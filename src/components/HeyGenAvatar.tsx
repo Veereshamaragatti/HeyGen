@@ -20,6 +20,7 @@ const HeyGenAvatar: React.FC = () => {
   const sessionRef = useRef<SessionData | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   
+  // Basic states
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [sessions, setSessions] = useState<SessionTiming[]>([])
@@ -27,6 +28,12 @@ const HeyGenAvatar: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [micPermission, setMicPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt')
   const [textInput, setTextInput] = useState('')
+  
+  // Voice chat states
+  const [isVoiceChatActive, setIsVoiceChatActive] = useState(false)
+  const [isVoiceChatLoading, setIsVoiceChatLoading] = useState(false)
+  const [isMuted, setIsMuted] = useState(true)
+  const [chatMode, setChatMode] = useState<'voice' | 'text'>('text')
 
   // Format time to IST
   const formatToIST = (date: Date): string => {
@@ -67,6 +74,94 @@ const HeyGenAvatar: React.FC = () => {
     }
   }
 
+  // Voice Chat Functions
+  const startVoiceChat = async (isInputAudioMuted?: boolean) => {
+    if (!avatarRef.current || !isConnected) {
+      console.error('Avatar not connected')
+      return
+    }
+
+    if (micPermission !== 'granted') {
+      const granted = await requestMicrophonePermission()
+      if (!granted) return
+    }
+
+    try {
+      setIsVoiceChatLoading(true)
+      console.log('🎤 Starting voice chat...')
+      
+      await avatarRef.current.startVoiceChat({
+        isInputAudioMuted: isInputAudioMuted || false
+      })
+      
+      setIsVoiceChatActive(true)
+      setIsMuted(!!isInputAudioMuted)
+      setChatMode('voice')
+      setIsVoiceChatLoading(false)
+      
+      console.log('✅ Voice chat started')
+      
+      // Welcome message for voice chat
+      setTimeout(() => {
+        speakText("Voice chat is now active! You can speak to me naturally and I'll respond.")
+      }, 1000)
+    } catch (error) {
+      console.error('Error starting voice chat:', error)
+      setIsVoiceChatLoading(false)
+    }
+  }
+
+  const stopVoiceChat = () => {
+    if (!avatarRef.current) return
+    
+    try {
+      avatarRef.current.closeVoiceChat()
+      setIsVoiceChatActive(false)
+      setIsMuted(true)
+      setChatMode('text')
+      console.log('🛑 Voice chat stopped')
+    } catch (error) {
+      console.error('Error stopping voice chat:', error)
+    }
+  }
+
+  const muteInputAudio = () => {
+    if (!avatarRef.current || !isVoiceChatActive) return
+    
+    try {
+      avatarRef.current.muteInputAudio()
+      setIsMuted(true)
+      console.log('🔇 Input audio muted')
+    } catch (error) {
+      console.error('Error muting input audio:', error)
+    }
+  }
+
+  const unmuteInputAudio = () => {
+    if (!avatarRef.current || !isVoiceChatActive) return
+    
+    try {
+      avatarRef.current.unmuteInputAudio()
+      setIsMuted(false)
+      console.log('🔊 Input audio unmuted')
+    } catch (error) {
+      console.error('Error unmuting input audio:', error)
+    }
+  }
+
+  // Interrupt avatar speaking
+  const interrupt = async () => {
+    try {
+      if (avatarRef.current && isSpeaking) {
+        await avatarRef.current.interrupt()
+        setIsSpeaking(false)
+        console.log('🛑 Avatar interrupted')
+      }
+    } catch (error) {
+      console.error('Error interrupting avatar:', error)
+    }
+  }
+
   // Make avatar speak text
   const speakText = async (text: string) => {
     if (!avatarRef.current || !isConnected) {
@@ -80,7 +175,7 @@ const HeyGenAvatar: React.FC = () => {
       
       await avatarRef.current.speak({
         text: text,
-        taskType: undefined // or remove this line if not needed, or use the correct TaskType enum if available
+        taskType: undefined
       })
     } catch (error) {
       console.error('Error making avatar speak:', error)
@@ -89,7 +184,7 @@ const HeyGenAvatar: React.FC = () => {
     }
   }
 
-  // Start voice recording
+  // Start voice recording (legacy)
   const startRecording = async () => {
     if (micPermission !== 'granted') {
       const granted = await requestMicrophonePermission()
@@ -109,11 +204,10 @@ const HeyGenAvatar: React.FC = () => {
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' })
-        // Here you would typically send this to a speech-to-text service
         console.log('🎵 Audio recorded:', audioBlob)
         
         // For demo, make avatar speak a response
-        speakText("I heard you speaking! This is a demo response.")
+        speakText("I heard you speaking! This is a demo response from legacy recording.")
       }
 
       mediaRecorder.start()
@@ -124,7 +218,7 @@ const HeyGenAvatar: React.FC = () => {
     }
   }
 
-  // Stop voice recording
+  // Stop voice recording (legacy)
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop()
@@ -177,7 +271,7 @@ const HeyGenAvatar: React.FC = () => {
     }
   }
 
-  // Fetch sessions from Supabase
+  // Fetch sessions from Supabase (keep for background functionality)
   const fetchSessions = async () => {
     try {
       const { data, error } = await supabase
@@ -228,8 +322,8 @@ const HeyGenAvatar: React.FC = () => {
         // Set video stream with audio enabled
         if (videoRef.current && event.detail) {
           videoRef.current.srcObject = event.detail
-          videoRef.current.muted = false // Ensure audio is enabled
-          videoRef.current.volume = 1.0 // Set volume to maximum
+          videoRef.current.muted = false
+          videoRef.current.volume = 1.0
           videoRef.current.play()
         }
         
@@ -238,12 +332,19 @@ const HeyGenAvatar: React.FC = () => {
         
         // Welcome message
         setTimeout(() => {
-          speakText("Hello! I'm your AI avatar. I can hear and speak with you!")
+          speakText("Hello! I'm your AI avatar. You can chat with me using text or voice!")
         }, 1000)
       })
 
       avatarRef.current.on(StreamingEvents.STREAM_DISCONNECTED, () => {
         console.log('⛔ Stream disconnected')
+        
+        // Stop voice chat if active
+        if (isVoiceChatActive) {
+          setIsVoiceChatActive(false)
+          setIsMuted(true)
+          setChatMode('text')
+        }
         
         if (sessionRef.current) {
           const endTime = new Date()
@@ -257,10 +358,10 @@ const HeyGenAvatar: React.FC = () => {
         }
         
         setIsConnected(false)
-        fetchSessions()
+        fetchSessions() // Still fetch in background for data tracking
       })
 
-      // Add speaking events
+      // Avatar speaking events
       avatarRef.current.on(StreamingEvents.AVATAR_START_TALKING, () => {
         console.log('🗣️ Avatar started talking')
         setIsSpeaking(true)
@@ -271,7 +372,16 @@ const HeyGenAvatar: React.FC = () => {
         setIsSpeaking(false)
       })
 
-      // Start avatar session
+      // Voice chat events
+      avatarRef.current.on(StreamingEvents.USER_START, () => {
+        console.log('👤 User started speaking')
+      })
+
+      avatarRef.current.on(StreamingEvents.USER_STOP, () => {
+        console.log('👤 User stopped speaking')
+      })
+
+      // Start avatar session with knowledge base
       await avatarRef.current.createStartAvatar({
         quality: AvatarQuality.Low,
         avatarName: 'Bryan_IT_Sitting_public',
@@ -280,6 +390,7 @@ const HeyGenAvatar: React.FC = () => {
           emotion: VoiceEmotion.EXCITED,
         },
         language: 'en',
+        knowledgeId: '119141f46bfc42829a076b1c432294b5',
       })
 
     } catch (error) {
@@ -291,6 +402,11 @@ const HeyGenAvatar: React.FC = () => {
   // Stop avatar session
   const stopAvatar = async () => {
     try {
+      // Stop voice chat if active
+      if (isVoiceChatActive) {
+        stopVoiceChat()
+      }
+      
       if (avatarRef.current) {
         await avatarRef.current.stopAvatar()
         avatarRef.current = null
@@ -313,9 +429,18 @@ const HeyGenAvatar: React.FC = () => {
     }
   }
 
+  // Toggle chat mode
+  const toggleChatMode = (mode: 'voice' | 'text') => {
+    if (mode === 'voice' && chatMode === 'text' && !isVoiceChatActive && !isVoiceChatLoading) {
+      startVoiceChat(false)
+    } else if (mode === 'text' && chatMode === 'voice' && isVoiceChatActive && !isVoiceChatLoading) {
+      stopVoiceChat()
+    }
+  }
+
   // Load sessions on component mount
   useEffect(() => {
-    fetchSessions()
+    fetchSessions() // Still fetch for background tracking
     // Request microphone permission on load
     requestMicrophonePermission()
   }, [])
@@ -346,11 +471,38 @@ const HeyGenAvatar: React.FC = () => {
               <p className="text-blue-400">Connecting...</p>
             </div>
           )}
+          
+          {/* Status indicators */}
+          <div className="absolute top-4 right-4 flex flex-col gap-2">
+            {isSpeaking && (
+              <div className="bg-green-500 text-white px-3 py-1 rounded-full text-sm">
+                🗣️ Speaking
+              </div>
+            )}
+            {isVoiceChatActive && (
+              <div className="bg-blue-500 text-white px-3 py-1 rounded-full text-sm">
+                🎤 Voice Chat
+              </div>
+            )}
+            {isVoiceChatActive && !isMuted && (
+              <div className="bg-green-500 text-white px-3 py-1 rounded-full text-sm animate-pulse">
+                🎙️ Listening
+              </div>
+            )}
+          </div>
+          
+          {/* Interrupt button */}
           {isSpeaking && (
-            <div className="absolute top-4 right-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm">
-              🗣️ Speaking
+            <div className="absolute bottom-4 right-4">
+              <button
+                onClick={interrupt}
+                className="bg-zinc-700 text-white px-4 py-2 rounded-lg hover:bg-zinc-600"
+              >
+                Interrupt
+              </button>
             </div>
           )}
+          
           <video
             ref={videoRef}
             className="w-full h-full object-cover"
@@ -361,6 +513,69 @@ const HeyGenAvatar: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Chat Mode Toggle */}
+      <div className="mb-6 flex justify-center">
+        <div className={`bg-zinc-700 rounded-lg p-1 inline-flex ${isVoiceChatLoading ? "opacity-50" : ""}`}>
+          <button
+            disabled={isVoiceChatLoading || !isConnected}
+            className={`rounded-lg p-2 text-sm w-[90px] text-center transition-colors ${
+              chatMode === 'voice' ? 'bg-zinc-800 text-white' : 'text-gray-300 hover:text-white'
+            }`}
+            onClick={() => toggleChatMode('voice')}
+          >
+            {isVoiceChatLoading ? 'Loading...' : 'Voice Chat'}
+          </button>
+          <button
+            disabled={isVoiceChatLoading}
+            className={`rounded-lg p-2 text-sm w-[90px] text-center transition-colors ${
+              chatMode === 'text' ? 'bg-zinc-800 text-white' : 'text-gray-300 hover:text-white'
+            }`}
+            onClick={() => toggleChatMode('text')}
+          >
+            Text Chat
+          </button>
+        </div>
+      </div>
+
+      {/* Knowledge Base Info */}
+      <div className="mb-4 p-3 bg-green-50 rounded-lg">
+        <p className="text-sm text-green-700">
+          🧠 <strong>Knowledge Base Connected:</strong> Avatar has access to your custom knowledge base (ID: 119141f46bfc42829a076b1c432294b5)
+        </p>
+      </div>
+
+      {/* Voice Chat Status & Controls */}
+      {chatMode === 'voice' && (
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">Voice Chat Status</h3>
+            {isVoiceChatActive && (
+              <button
+                onClick={isMuted ? unmuteInputAudio : muteInputAudio}
+                className={`px-3 py-1 text-xs rounded ${
+                  isMuted 
+                    ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                }`}
+              >
+                {isMuted ? '🔇 Unmute' : '🔊 Mute'}
+              </button>
+            )}
+          </div>
+          <div className="space-y-2 text-sm">
+            <p>Status: <span className="font-medium text-blue-600">
+              {isVoiceChatActive ? 'Active - Speak naturally!' : 'Inactive'}
+            </span></p>
+            <p>Audio Input: <span className={`font-medium ${!isMuted ? 'text-green-600' : 'text-red-600'}`}>
+              {!isMuted ? 'Enabled' : 'Muted'}
+            </span></p>
+            <p className="text-gray-600">
+              💡 Tip: Ask questions related to your knowledge base! The avatar will use your custom data to respond.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Microphone Status */}
       <div className="mb-4 p-3 bg-blue-50 rounded-lg">
@@ -376,30 +591,32 @@ const HeyGenAvatar: React.FC = () => {
         </p>
       </div>
 
-      {/* Text Input for Speaking */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <h3 className="font-semibold mb-3">Make Avatar Speak</h3>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            placeholder="Type what you want the avatar to say..."
-            className="flex-1 px-3 py-2 border rounded-lg"
-            onKeyPress={(e) => e.key === 'Enter' && handleTextSpeak()}
-          />
-          <button
-            onClick={handleTextSpeak}
-            disabled={!isConnected || !textInput.trim() || isSpeaking}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg disabled:opacity-50 hover:bg-purple-700"
-          >
-            {isSpeaking ? 'Speaking...' : 'Speak'}
-          </button>
+      {/* Text Input for Speaking (only show in text mode) */}
+      {chatMode === 'text' && (
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="font-semibold mb-3">Make Avatar Speak</h3>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="Ask questions about your knowledge base or type anything..."
+              className="flex-1 px-3 py-2 border rounded-lg"
+              onKeyPress={(e) => e.key === 'Enter' && handleTextSpeak()}
+            />
+            <button
+              onClick={handleTextSpeak}
+              disabled={!isConnected || !textInput.trim() || isSpeaking}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg disabled:opacity-50 hover:bg-purple-700"
+            >
+              {isSpeaking ? 'Speaking...' : 'Speak'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Controls */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex gap-4 mb-6 flex-wrap">
         <button
           onClick={initializeAvatar}
           disabled={isConnected || isLoading}
@@ -416,14 +633,15 @@ const HeyGenAvatar: React.FC = () => {
           Stop Avatar
         </button>
 
+        {/* Legacy Recording Button (for manual testing) */}
         <button
           onClick={isRecording ? stopRecording : startRecording}
-          disabled={!isConnected || micPermission !== 'granted'}
+          disabled={!isConnected || micPermission !== 'granted' || isVoiceChatActive}
           className={`px-6 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-            isRecording ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'
+            isRecording ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-600 hover:bg-gray-700'
           }`}
         >
-          {isRecording ? '🛑 Stop Recording' : '🎤 Start Recording'}
+          {isRecording ? '🛑 Stop Legacy Recording' : '🎤 Legacy Recording'}
         </button>
 
         <button
@@ -437,40 +655,21 @@ const HeyGenAvatar: React.FC = () => {
       {/* Session Status */}
       <div className="mb-6 p-4 bg-gray-100 rounded-lg">
         <h3 className="font-semibold mb-2">Current Session Status</h3>
-        <p>Status: <span className={`font-medium ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
+        <p>Connection: <span className={`font-medium ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
           {isConnected ? 'Connected' : 'Disconnected'}
         </span></p>
         {sessionRef.current && (
           <p>Session ID: <span className="font-mono text-sm">{sessionRef.current.id}</span></p>
         )}
-        <p>Recording: <span className={`font-medium ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>
+        <p>Chat Mode: <span className={`font-medium ${chatMode === 'voice' ? 'text-blue-600' : 'text-purple-600'}`}>
+          {chatMode === 'voice' ? 'Voice Chat' : 'Text Chat'}
+        </span></p>
+        <p>Voice Chat: <span className={`font-medium ${isVoiceChatActive ? 'text-green-600' : 'text-gray-600'}`}>
+          {isVoiceChatActive ? 'Active' : 'Inactive'}
+        </span></p>
+        <p>Legacy Recording: <span className={`font-medium ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>
           {isRecording ? 'Active' : 'Inactive'}
         </span></p>
-      </div>
-
-      {/* Sessions History */}
-      <div>
-        <h3 className="text-xl font-semibold mb-4">Recent Sessions</h3>
-        <div className="space-y-3">
-          {sessions.map((session) => (
-            <div key={session.id} className="p-4 border rounded-lg">
-              <p><strong>Session ID:</strong> <span className="font-mono text-sm">{session.id}</span></p>
-              <p><strong>Start Time (IST):</strong> {new Date(session.start_time).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}</p>
-              {session.end_time && (
-                <>
-                  <p><strong>End Time (IST):</strong> {new Date(session.end_time).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}</p>
-                  <p><strong>Duration:</strong> {session.duration}</p>
-                </>
-              )}
-              {!session.end_time && (
-                <p className="text-yellow-600"><strong>Status:</strong> Active</p>
-              )}
-            </div>
-          ))}
-          {sessions.length === 0 && (
-            <p className="text-gray-500">No sessions found</p>
-          )}
-        </div>
       </div>
     </div>
   )
